@@ -29,11 +29,11 @@ public class Peer {
 
     public void insertData(String name, Integer length) {
         if(!this.data.containsKey(name))
-            this.data.put(name, length);
+            this.data.put(name.toLowerCase(), length);
     }
 
     public Integer getData(String name) {
-        return this.data.get(name);
+        return this.data.get(name.toLowerCase());
     }
     
     public Integer getDataCount() {

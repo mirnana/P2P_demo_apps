@@ -1,4 +1,5 @@
 import java.io.PrintWriter;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.Socket;
 
@@ -18,9 +19,10 @@ public class Message {
 
             var out = new PrintWriter(client.getOutputStream(), true);
             out.println(payload);
+        } catch(ConnectException c) {
+            // ovaj exception se javlja samo kad jedan peer prestane raditi. 
+            // ta greška se može progutati jer će nakon 5 pingova susjedi mrtvog peera odustati od veze
         } catch(Exception e) {
-            // exception ce se dogoditi samo kad je host prestao raditi
-            // dići custom exception da javimo Gnutelli da može maknuti receivera iz peers
             System.err.println("Message->send error: " + e.getMessage());
             e.printStackTrace();
         }

@@ -12,6 +12,7 @@ public class Gnutella {
     public final static int DEFAULT_PORT    = 8080;
     public final static int MAX_CONNECTIONS = 5;
     public final static int SLEEP_SECONDS   = 10;
+    public final static int DEFAULT_TTL     = 30 * 1000;    // u milisekundama
 
     public static void main(String[] args) {
         Integer port = DEFAULT_PORT;
@@ -40,8 +41,8 @@ public class Gnutella {
         g.start();
     }
     
-    Map<String, Integer> peers = new HashMap<String, Integer>();    // (peer.getAddress, numPings-numPongs)
-    Map<String, Peer> pendingQueries = new HashMap<String, Peer>(); // (searched term, peer from whom query was forwarded)
+    Map<String, Integer> peers = new HashMap<String, Integer>();        // (peer.getAddress, numPings-numPongs)
+    Map<String, Query> pendingQueries = new HashMap<String, Query>();   // (searched term, query{sender=od koga je stigao})
 
     Peer thisPeer;
 
@@ -61,7 +62,8 @@ public class Gnutella {
             connectPort = Integer.parseInt(split[1]);
 
         Peer p = new Peer(connectPort, ip);
-        peers.put(p.getAddress(), 0);
+        if(peers.size() < MAX_CONNECTIONS)
+            peers.put(p.getAddress(), 0);
     }
 
     public String getMyIP() {
@@ -97,7 +99,20 @@ public class Gnutella {
             String str = sc.nextLine();
 
             if(str.equals("q")) {
-
+                System.out.println("Unesi ime rijeke");
+                String name = sc.nextLine();
+                Integer length = thisPeer.getData(name);
+                if(length == null) {
+                    for(String peer : peers.keySet()) {
+                        Query q = new Query(thisPeer, new Peer(peer), name, System.currentTimeMillis(), DEFAULT_TTL);
+                        q.send();
+                    }
+                    Query q = new Query(thisPeer, null, name, System.currentTimeMillis(), DEFAULT_TTL);
+                    pendingQueries.put(name.toLowerCase(), q);
+                }
+                else {
+                    System.out.println("Duljina rijeke " + name + " je " + length);
+                }
             } else if(str.equals("i")) {
                 System.out.println("Unesi ime rijeke");
                 String name = sc.nextLine();
@@ -137,14 +152,15 @@ public class Gnutella {
                     else {
                         Ping p = new Ping(thisPeer, new Peer(peer));
                         p.send();
-                        peers.put(peer, peers.get(peer) + 1);
+                        peers.replace(peer, peers.get(peer) + 1);
                     }
                 }
-
                 // brišem susjede koji se dugo nisu javili
                 for(String peer : removable) {
                     peers.remove(peer);
                 }
+
+                cleanPendingQueries();
 
                 try {
                     TimeUnit.SECONDS.sleep(SLEEP_SECONDS);
@@ -175,18 +191,47 @@ public class Gnutella {
                         
                         String peer = split[2] + ":" + split[1];
                         if(split[0].equals("ping")) {
-                            if(!peers.containsKey(peer))
+                            if(!peers.containsKey(peer) && peers.size() < MAX_CONNECTIONS) {
                                 peers.put(peer, 0);
+                            }
                             Pong p = new Pong(thisPeer, new Peer(peer));
                             p.send();
                         } else if(split[0].equals("pong")) {
-                            if(peers.containsKey(peer)) {
-                                peers.replace(peer, peers.get(peer) - 1);
-                            }
+                            peers.replace(peer, peers.get(peer) - 1);
                         } else if(split[0].equals("query")) {
+                            String name = split[3].toLowerCase();
+                            Long timestamp = Long.parseLong(split[4]);
+                            Long timeToLive = Long.parseLong(split[5]);
+                            if(System.currentTimeMillis() - timestamp >= timeToLive 
+                                || pendingQueries.containsKey(name))
+                                continue;
+                            Integer length = thisPeer.getData(name);
+                            if(length == null) {
+                                Query q = new Query(new Peer(peer), null, name, timestamp, timeToLive);
+                                pendingQueries.put(name, q);
 
+                                for(var p : peers.keySet()) {
+                                    q = new Query(thisPeer, new Peer(p), name, timestamp, timeToLive);
+                                    q.send();
+                                }
+                            }
+                            else {
+                                QueryHit qh = new QueryHit(thisPeer, new Peer(peer), name, length);
+                                qh.send();
+                            }
                         } else if(split[0].equals("qhit")) {
-
+                            String name = split[3].toLowerCase();
+                            Integer length = Integer.parseInt(split[4]);
+                            Query q = pendingQueries.get(name);
+                            if(q == null)
+                                continue;
+                            // osiguravam replikciju podataka -- sve podatke koje prosljeđujem, usput sačuvam i sebi
+                            thisPeer.insertData(name, length);
+                             // ako nisam ja originalno postavila ovaj query, onda odgovor prosljeđujem peeru koji je meni poslao taj query
+                            if(!q.sender.equals(thisPeer)) {   
+                                QueryHit qh = new QueryHit(thisPeer, new Peer(peer), name, length);
+                                qh.send();
+                            }
                         }
                     }
                 }
@@ -194,6 +239,27 @@ public class Gnutella {
                 System.err.println("MessageReceiver error: " + e.getMessage());
                 e.printStackTrace();
             }
+        }
+    }
+
+    public void cleanPendingQueries() {
+        ArrayList<String> removable = new ArrayList<>();
+        for(var q : pendingQueries.entrySet()) {
+            var key = q.getKey();
+            var val = q.getValue();
+            if(System.currentTimeMillis() - val.timestamp >= val.timeToLive)
+                removable.add(key);
+            if(thisPeer.getData(key) != null) {
+                removable.add(key);
+                // ako saznam odgovor na neki query, proslijedim ga
+                if(!val.sender.equals(thisPeer)) {
+                    QueryHit qh = new QueryHit(thisPeer, val.sender, key, thisPeer.getData(key));
+                    qh.send();
+                }
+            }
+        }
+        for(String query : removable) {
+            pendingQueries.remove(query);
         }
     }
 }
