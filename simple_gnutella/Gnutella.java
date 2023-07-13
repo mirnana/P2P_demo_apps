@@ -47,29 +47,34 @@ public class Gnutella {
     Peer thisPeer;
 
     Gnutella(Integer port) {
-        thisPeer = new Peer(port, getMyIP());
+        thisPeer = new Peer(port, getMyIP().toString());
     }
 
     public void connect(String address) {
         String[] split = address.split(":", 2);
-        String ip = split[0];
-        if (ip.equalsIgnoreCase("localhost") || ip.equalsIgnoreCase("127.0.0.1"))
-        {
-            ip = getMyIP();
-        }
+        String ip = "localhost";
         Integer connectPort = DEFAULT_PORT;
-        if (split.length > 1)
+        if(split.length > 1) {
+            ip = split[0];
+            if (ip.equalsIgnoreCase("localhost") || ip.equalsIgnoreCase("127.0.0.1"))
+            {
+                ip = getMyIP().toString();
+            }
             connectPort = Integer.parseInt(split[1]);
+        }
+        else {
+            ip = getMyIP().toString();
+            connectPort = Integer.parseInt(split[0]);
+        }
 
         Peer p = new Peer(connectPort, ip);
         if(peers.size() < MAX_CONNECTIONS)
             peers.put(p.getAddress(), 0);
     }
 
-    public String getMyIP() {
-        try (final DatagramSocket datagramSocket = new DatagramSocket()){
-            datagramSocket.connect(InetAddress.getByName("8.8.8.8"), 12345);
-            return datagramSocket.getLocalAddress().getHostAddress();
+    public InetAddress getMyIP() {
+        try {
+            return InetAddress.getLocalHost();
         } catch (Exception e) {
             System.err.println("Error getting local IP: " + e.getMessage());
             e.printStackTrace();
@@ -122,7 +127,7 @@ public class Gnutella {
             } else if (str.equals("p")) {
                 thisPeer.printData();
             } else if(str.equals("c")) {
-                System.out.println("Unesi <adresa>:<port>");
+                System.out.println("Unesi <adresa>:<port> | <port>; potonje rezultira povezivanjem na localhost");
                 String address = sc.nextLine();
                 this.connect(address);
             } else if(str.equals("t")) {
@@ -180,7 +185,7 @@ public class Gnutella {
 
         public void run() {
 
-            try (ServerSocket server = new ServerSocket(thisPeer.port, 0, InetAddress.getLocalHost())) { //zasad samo localhost!!!!!!!!!
+            try (ServerSocket server = new ServerSocket(thisPeer.port, 0, getMyIP())) {
                 while(running) {
                     Socket socket = server.accept();
                     var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -197,7 +202,11 @@ public class Gnutella {
                             Pong p = new Pong(thisPeer, new Peer(peer));
                             p.send();
                         } else if(split[0].equals("pong")) {
-                            peers.replace(peer, peers.get(peer) - 1);
+                            try {
+                                peers.replace(peer, peers.get(peer) - 1);
+                            } catch(Exception e) {
+                                // progutaj grešku, nema veze
+                            }
                         } else if(split[0].equals("query")) {
                             String name = split[3].toLowerCase();
                             Long timestamp = Long.parseLong(split[4]);
